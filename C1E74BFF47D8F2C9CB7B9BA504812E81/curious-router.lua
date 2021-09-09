@@ -3,7 +3,9 @@ local OUTPUT_CENTER = 1
 local OUTPUT_RIGHT = 2
 local DIRECTION_IN = 0
 local CONVEYOR_TYPE = 0
+local TIMEOUT = 5 -- how long to wait in seconds for an event before manually routing
 
+--get the items in a producer's input inventory
 local function getLoadedItemsFor(producer)
   local inv = producer:getInputInv()
   local result = {}
@@ -14,8 +16,13 @@ local function getLoadedItemsFor(producer)
   return result
 end
 
+-- cache of recipe ingredients per producer
 local ingredientCache = {}
 
+-- track items on belts
+local inTransit = {}
+
+-- determines the count of currently needed items for a producer
 local function getRequiredItemsFor(producer)
   local ingredients
   if ingredientCache[producer:getHash()] then
@@ -35,48 +42,8 @@ local function getRequiredItemsFor(producer)
   return result
 end
 
-print('curious router loaded')
-
-local function dumpInventory(obj)
-
-  local function dump(inv)
-    if inv then
-      local size = inv.size
-      print('inventory of size', size)
-      local empty = true
-
-      for i = 0, size - 1 do
-        local stack = inv:getStack(i)
-        if stack.item.type then
-          empty = false
-          print('stack #', i, '=>', stack.item.type.name, '#', stack.count)
-        end
-      end
-
-      if empty then print('(empty)') end
-    end
-  end
-
-  if type(obj.getInventories) == 'function' then
-    print('all inventories of', obj)
-    for _, inv in ipairs(obj:getInventories()) do dump(inv) end
-  elseif type(obj.getInventory) == 'function' then
-    local inv = obj:getInventory()
-    if inv ~= nil then
-      print('inventory of', obj)
-      dump(obj:getInventory())
-    end
-  end
-  if type(obj.getFactoryConnectors) == 'function' then
-    print('factory connectors in', obj)
-    for _, thing in ipairs(obj:getFactoryConnectors()) do
-      dumpInventory(thing)
-    end
-  end
-end
-
-local inTransit = {}
-
+-- returns a function which determines where to send an item.
+-- each splitter executes said function when its `ItemRequest` event fires
 local function createItemRequestListener(splitter, producer)
   return function()
     local required = getRequiredItemsFor(producer)
@@ -84,16 +51,20 @@ local function createItemRequestListener(splitter, producer)
       local inputItem = splitter:getInput()
       local item = inputItem.type.name
       if required[item] ~= nil then
-        local reqLessTransferred = required[item] - (inTransit[item] or 0)
+        local producerHash = producer:getHash()
+        if inTransit[producerHash] == nil then
+          inTransit[producerHash] = {}
+        end
+        local reqLessTransferred = required[item] - (inTransit[producerHash][item] or 0)
         if reqLessTransferred > 0 then
           -- print('need', reqLessTransferred, item)
           if splitter:canOutput(OUTPUT_LEFT) then
             if splitter:transferItem(OUTPUT_LEFT) then
               print(item, '=> LEFT')
-              if inTransit[item] == nil then
-                inTransit[item] = 0
+              if inTransit[producerHash][item] == nil then
+                inTransit[producerHash][item] = 0
               end
-              inTransit[item] = inTransit[item] + 1
+              inTransit[producerHash][item] = inTransit[producerHash][item] + 1
               return
             end
           else
@@ -121,15 +92,21 @@ local function createItemRequestListener(splitter, producer)
   end
 end
 
-local function createItemTransferListener(conn)
+-- creates a function which decrements the count of in-transit items
+-- for a given producer. run when the `ItemTransfer` event of the producer's
+-- factory connection fires
+local function createItemTransferListener(producer)
+  local producerHash = producer:getHash()
   return function(item)
     if item and item.type then
       local name = item.type.name
-      inTransit[name] = (inTransit[name] or 1) - 1
+      inTransit[producerHash][name] = (inTransit[producerHash][name] or 1) - 1
     end
   end
 end
 
+-- finds the relevant factory connection. there's going to be a single input belt, and
+-- this returns the connection for that.
 local function getConnectedInput(actor)
   if type(actor.getFactoryConnectors) == 'function' then
     for _, conn in ipairs(actor:getFactoryConnectors()) do
@@ -140,20 +117,21 @@ local function getConnectedInput(actor)
   end
 end
 
+-- configures all the things. expects a table of pairs of splitters & producers.
 local function setup(tuples)
   local evtMap = {}
-
+  
+  --This just runs all of the listener functions in case an event was missed.
   local function kickstart()
     print('kickstarting...')
-    for hash, map in pairs(evtMap) do
-      for evt, func in pairs(map) do
+    for _, map in pairs(evtMap) do
+      for _, func in pairs(map) do
         func()
       end
     end
   end
 
   for _, tuple in ipairs(tuples) do
-    print(tuple[1], tuple[2])
     local splitter = component.proxy(component.findComponent(tuple[1]))[1]
     local producer = component.proxy(component.findComponent(tuple[2]))[1]
     print('routing splitter/producer pair', splitter:getHash(), '/', producer:getHash())
@@ -161,17 +139,23 @@ local function setup(tuples)
     event.listen(producer)
 
     local conn = getConnectedInput(producer)
-    local itemTransferListener = createItemTransferListener(conn)
+    local itemTransferListener = createItemTransferListener(producer)
     local itemReqListener = createItemRequestListener(splitter, producer)
 
     evtMap[conn:getHash()] = {ItemTransfer = itemTransferListener}
     evtMap[splitter:getHash()] = {ItemRequest = itemReqListener}
+
+    -- run this to make sure there isn't anything sitting in a splitter's inventory
     itemReqListener()
+    
+    -- TODO: handle case where an item is on a belt from a splitter to producer just before
+    -- startup.
   end
 
   print('configured', #tuples, 'pairs; listening for events')
+
   while true do
-    local evt, actor, param = event.pull(5)
+    local evt, actor, param = event.pull(TIMEOUT)
     if evt and actor then
       local hash = actor:getHash()
       if evtMap[hash] and evtMap[hash][evt] then 
