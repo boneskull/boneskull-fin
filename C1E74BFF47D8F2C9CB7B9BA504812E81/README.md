@@ -30,6 +30,11 @@ Here is a crappy diagram:
             [Input]
 ```
 
+Here's a screenshot, if it works:
+
+![526870_20210909133650_1](https://user-images.githubusercontent.com/924465/132759604-8be41962-3393-4138-a9a8-6a1d232d5ea4.png)
+
+
 ## Behavior
 
 The algorithm, roughly:
