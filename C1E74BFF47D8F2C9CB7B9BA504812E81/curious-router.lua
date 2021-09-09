@@ -89,24 +89,32 @@ local function createItemRequestListener(splitter, producer)
           -- print('need', reqLessTransferred, item)
           if splitter:canOutput(OUTPUT_LEFT) then
             if splitter:transferItem(OUTPUT_LEFT) then
+              print(item, '=> LEFT')
               if inTransit[item] == nil then
                 inTransit[item] = 0
               end
               inTransit[item] = inTransit[item] + 1
+              return
             end
           else
-            -- print('overflow!')
-            splitter:transferItem(OUTPUT_RIGHT)
+            print(item, '=> RIGHT')
+            if splitter:transferItem(OUTPUT_RIGHT) then
+              return
+            end
           end
-        else
-          -- print('excess of', item)
-          splitter:transferItem(OUTPUT_RIGHT)
         end
       else
         if splitter:canOutput(OUTPUT_CENTER) then
-          splitter:transferItem(OUTPUT_CENTER)
-        else
-          splitter:transferItem(OUTPUT_RIGHT)
+          print(item, '=> CENTER')
+          if splitter:transferItem(OUTPUT_CENTER) then
+            return
+          end
+        end
+      end
+      print(item, '=> RIGHT')
+      while true do
+        if splitter:transferItem(OUTPUT_RIGHT) then
+          return
         end
       end
     end
@@ -135,9 +143,18 @@ end
 local function setup(tuples)
   local evtMap = {}
 
+  local function kickstart()
+    print('kickstarting...')
+    for hash, map in pairs(evtMap) do
+      for evt, func in pairs(map) do
+        func()
+      end
+    end
+  end
+
   for _, tuple in ipairs(tuples) do
-    local splitter =
-    component.proxy(component.findComponent(tuple[1]))[1]
+    print(tuple[1], tuple[2])
+    local splitter = component.proxy(component.findComponent(tuple[1]))[1]
     local producer = component.proxy(component.findComponent(tuple[2]))[1]
     print('routing splitter/producer pair', splitter:getHash(), '/', producer:getHash())
     event.listen(splitter)
@@ -149,16 +166,20 @@ local function setup(tuples)
 
     evtMap[conn:getHash()] = {ItemTransfer = itemTransferListener}
     evtMap[splitter:getHash()] = {ItemRequest = itemReqListener}
+    itemReqListener()
   end
 
+  print('configured', #tuples, 'pairs; listening for events')
   while true do
-    local evt, actor, param = event.pull(0)
-    if actor then
+    local evt, actor, param = event.pull(5)
+    if evt and actor then
       local hash = actor:getHash()
       if evtMap[hash] and evtMap[hash][evt] then 
         -- print('dispatching listener for event', evt, 'for', actor, actor:getHash())
-        evtMap[hash][evt](param) 
+        evtMap[hash][evt](param)
       end
+    else
+      kickstart()
     end
   end
 end
