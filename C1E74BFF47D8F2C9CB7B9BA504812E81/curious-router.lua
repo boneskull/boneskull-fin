@@ -1,11 +1,53 @@
+dump = function(value)
+  local seen = { }
+  local _dump
+  _dump = function(what, depth)
+    if depth == nil then
+      depth = 0
+    end
+    local t = type(what)
+    if t == "string" then
+      return '"' .. what .. '"\n'
+    elseif t == "table" then
+      if seen[what] then
+        return "recursion(" .. tostring(what) .. ")...\n"
+      end
+      seen[what] = true
+      depth = depth + 1
+      local lines
+      do
+        local _accum_0 = { }
+        local _len_0 = 1
+        for k, v in pairs(what) do
+          _accum_0[_len_0] = (" "):rep(depth * 4) .. "[" .. tostring(k) .. "] = " .. _dump(v, depth)
+          _len_0 = _len_0 + 1
+        end
+        lines = _accum_0
+      end
+      seen[what] = false
+      local class_name
+      if what.__class then
+        class_name = "<" .. tostring(what.__class.__name) .. ">"
+      end
+      return tostring(class_name or "") .. "{\n" .. table.concat(lines) .. (" "):rep((depth - 1) * 4) .. "}\n"
+    else
+      return tostring(what) .. "\n"
+    end
+  end
+  return _dump(value)
+end
+p = function(...)
+  return print(dump(...))
+end
+
 local OUTPUT_LEFT = 0
 local OUTPUT_CENTER = 1
 local OUTPUT_RIGHT = 2
 local DIRECTION_IN = 0
 local CONVEYOR_TYPE = 0
-local TIMEOUT = 5 -- how long to wait in seconds for an event before manually routing
+local TIMEOUT = 1.0 -- how long to wait in seconds for an event before manually routing
 
---get the items in a producer's input inventory
+-- get the items in a producer's input inventory
 local function getLoadedItemsFor(producer)
   local inv = producer:getInputInv()
   local result = {}
@@ -55,12 +97,13 @@ local function createItemRequestListener(splitter, producer)
         if inTransit[producerHash] == nil then
           inTransit[producerHash] = {}
         end
-        local reqLessTransferred = required[item] - (inTransit[producerHash][item] or 0)
-        if reqLessTransferred > 0 then
+        local reqLessTransferred = required[item] -
+                                       (inTransit[producerHash][item] or 0)
+        if reqLessTransferred > 0 then 
           -- print('need', reqLessTransferred, item)
           if splitter:canOutput(OUTPUT_LEFT) then
             if splitter:transferItem(OUTPUT_LEFT) then
-              print(item, '=> LEFT')
+              -- print(item, '=> LEFT')
               if inTransit[producerHash][item] == nil then
                 inTransit[producerHash][item] = 0
               end
@@ -68,26 +111,19 @@ local function createItemRequestListener(splitter, producer)
               return
             end
           else
-            print(item, '=> RIGHT')
-            if splitter:transferItem(OUTPUT_RIGHT) then
-              return
+            if splitter:canOutput(OUTPUT_CENTER) then
+              -- print(item, '=> CENTER')
+              if splitter:transferItem(OUTPUT_CENTER) then return end
             end
           end
         end
-      else
-        if splitter:canOutput(OUTPUT_CENTER) then
-          print(item, '=> CENTER')
-          if splitter:transferItem(OUTPUT_CENTER) then
-            return
-          end
-        end
       end
-      print(item, '=> RIGHT')
-      while true do
-        if splitter:transferItem(OUTPUT_RIGHT) then
-          return
-        end
+      if splitter:canOutput(OUTPUT_CENTER) then
+        -- print(item, '=> CENTER')
+        if splitter:transferItem(OUTPUT_CENTER) then return end
       end
+      -- print(item, '=> RIGHT')
+      while true do if splitter:transferItem(OUTPUT_RIGHT) then return end end
     end
   end
 end
@@ -110,9 +146,8 @@ end
 local function getConnectedInput(actor)
   if type(actor.getFactoryConnectors) == 'function' then
     for _, conn in ipairs(actor:getFactoryConnectors()) do
-      if conn.isConnected and conn.direction == DIRECTION_IN and conn.type == CONVEYOR_TYPE then
-        return conn
-      end
+      if conn.isConnected and conn.direction == DIRECTION_IN and conn.type ==
+          CONVEYOR_TYPE then return conn end
     end
   end
 end
@@ -120,21 +155,19 @@ end
 -- configures all the things. expects a table of pairs of splitters & producers.
 local function setup(tuples)
   local evtMap = {}
-  
-  --This just runs all of the listener functions in case an event was missed.
+
+  -- This just runs all of the listener functions in case an event was missed.
   local function kickstart()
     print('kickstarting...')
-    for _, map in pairs(evtMap) do
-      for _, func in pairs(map) do
-        func()
-      end
-    end
+    -- for producerHash, itemMap in pairs(inTransit) do for itemName in pairs(itemMap) do inTransit[producerHash][itemName] = 0 end end
+    for _, map in pairs(evtMap) do for _, func in pairs(map) do func() end end
   end
 
   for _, tuple in ipairs(tuples) do
     local splitter = component.proxy(component.findComponent(tuple[1]))[1]
     local producer = component.proxy(component.findComponent(tuple[2]))[1]
-    print('routing splitter/producer pair', splitter:getHash(), '/', producer:getHash())
+    print('routing splitter/producer pair', splitter:getHash(), '/',
+          producer:getHash())
     event.listen(splitter)
     event.listen(producer)
 
@@ -147,24 +180,26 @@ local function setup(tuples)
 
     -- run this to make sure there isn't anything sitting in a splitter's inventory
     itemReqListener()
-    
+
     -- TODO: handle case where an item is on a belt from a splitter to producer just before
     -- startup.
   end
 
   print('configured', #tuples, 'pairs; listening for events')
 
-  while true do
+  while true do    
     local evt, actor, param = event.pull(TIMEOUT)
     if evt and actor then
       local hash = actor:getHash()
-      if evtMap[hash] and evtMap[hash][evt] then 
+      if evtMap[hash] and evtMap[hash][evt] then
         -- print('dispatching listener for event', evt, 'for', actor, actor:getHash())
         evtMap[hash][evt](param)
       end
     else
+      -- the event pull can timeout if we miss one.
       kickstart()
     end
+    computer.skip()
   end
 end
 

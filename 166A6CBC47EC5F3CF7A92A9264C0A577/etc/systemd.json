@@ -1,0 +1,12 @@
+{
+  "services": {
+    "monitor": {
+      "enabled": false,
+      "file": "/etc/service/monitor.lua"
+    },
+    "sam-machine-toggle": {
+      "enabled": true,
+      "file": "/etc/service/sam-machine-toggle.lua"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "box-comment.length": 120,
+  "filewatcher.commands": [
+    
+
+
+
+
+
+    
+
+
+
+    {
+      "match": "\\.moon*",
+      "isAsync": true,
+      "cmd": "${workspaceRoot}/build.sh ${workspaceRoot} ${file}",
+      "event": "onFileChange"
+    }
+  ]
+}

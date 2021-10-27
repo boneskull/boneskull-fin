@@ -1,0 +1,5 @@
+{
+  "site": "goblin",
+  "container_classes": ["Build_1_C"],
+  "updateInterval": 30
+}

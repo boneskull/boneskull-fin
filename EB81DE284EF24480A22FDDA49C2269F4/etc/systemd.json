@@ -1,0 +1,12 @@
+{
+  "services": {
+    "sinkplotd": {
+      "enabled": true,
+      "file": "/etc/service/sinkplotd.lua"
+    },
+    "example": {
+      "enabled": false,
+      "file": "/etc/service/example.lua"
+    }
+  }
+}

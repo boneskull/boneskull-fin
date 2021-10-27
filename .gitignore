@@ -1,1 +1,4 @@
-Icons
+*.lua
+*/LICENSE
+.shell_history
+.history

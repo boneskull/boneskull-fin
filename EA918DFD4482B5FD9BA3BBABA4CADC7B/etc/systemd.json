@@ -1,0 +1,16 @@
+{
+  "services": {
+    "monitor": {
+      "enabled": false,
+      "file": "/etc/service/monitor.lua"
+    },
+    "sinkd": {
+      "enabled": true,
+      "file": "/etc/service/sinkd.lua"
+    },
+    "sinkcopd": {
+      "enabled": true,
+      "file": "/etc/service/sinkcopd.lua"
+    }
+  }
+}
